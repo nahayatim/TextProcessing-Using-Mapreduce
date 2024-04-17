@@ -1,41 +1,52 @@
 import re
-import sys
-import os
 import json
+import mrjob
+import argparse
+import collections
 
-# Get the path to the input file from command line arguments
-input_path = sys.argv[1]
-stopwords_path = sys.argv[2]
+STOPWORDS = set() #We will populate this with stop words
 
-# Make sure the path is relative to the script location
-reviews_path = os.path.join(os.path.dirname(__file__), reviews_path)
-stopwords_path = os.path.join(os.path.dirname(__file__), stopwords_path)
+class ChiSquareWordCount(mrjob.MRJob):
+    def mapper(self, _, line):
+        review = json.loads(line)
+        text = review['reviewText']
+        category = review['category']
 
-# Read the reviews from the JSON file
-with open(reviews_path, 'r') as file:
-    reviews = json.load(file)
+        tokens = re.split(r'\W+', text.lower())  
+        filtered_tokens = [t for t in tokens if len(t) > 1 and t not in STOPWORDS]
 
-# Read the stopwords from the text file
-with open(stopwords_path, 'r') as file:
-    stopwords = file.read().splitlines()
+        for token in filtered_tokens:
+            yield (token, category), 1 
+            
+    def reducer(self, key, values):
+        word, category = key
+        word_count = sum(values)  # Count of the word within the category
 
+        # Data structure to store counts
+        self.counts = collections.defaultdict(lambda: {
+            'word_count': 0,
+            'category_count': 0,
+            'overall_count': 0
+        })  
 
-# Define the delimiters
-delimiters = r'\s|\t|\d|\(|\)|\[|\]|\{|\}|\.|\!|\?|\,|\;|\:|\+|\=|\-|\_|\\"|\'|\`|\~|\#|\@|\&|\*|\%|\€|\$|\§|\/'
+        # Update counts
+        self.counts[word]['word_count'] += word_count
+        self.counts[word]['category_count'] += 1  # Count occurrences of this category
+        self.counts[word]['overall_count'] += word_count 
 
-# Preprocessing function
-def preprocess_review(review):
-    # Tokenization
-    tokens = re.split(delimiters, review)
-    
-    # Case Folding
-    tokens = [token.lower() for token in tokens]
-    
-    # Stopword Filtering and filter out tokens of length 1
-    tokens = [token for token in tokens if token not in stopwords and len(token) > 1]
-    
-    return tokens
+    def final(self):
+        """Emit aggregated counts for chi-square calculations"""
+        for word, data in self.counts.items():
+            yield word, str(data)
 
-# Apply preprocessing to each review
-preprocessed_reviews = [preprocess_review(review) for review in reviews]
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--stopwords', help='Path to stopwords file')
+    parser.add_argument('--reviews', help='Path to reviews dataset')
+    args = parser.parse_args()
 
+    load_stopwords(args.stopwords)  
+    ChiSquareWordCount.ARGS = [
+        ('--reviews', args.reviews) 
+    ]
+    ChiSquareWordCount.run() 
