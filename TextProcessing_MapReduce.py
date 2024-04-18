@@ -1,12 +1,19 @@
 import re
 import json
-import mrjob
+from mrjob.job import MRJob
 import argparse
 import collections
 
 STOPWORDS = set() #We will populate this with stop words
 
-class ChiSquareWordCount(mrjob.MRJob):
+def load_stopwords(stopwords_file):
+    """Load stopwords from a file"""
+    with open(stopwords_file, 'r') as file:
+        for line in file:
+            STOPWORDS.add(line.strip())
+
+
+class ChiSquareWordCount(MRJob):
     def mapper(self, _, line):
         review = json.loads(line)
         text = review['reviewText']
@@ -40,10 +47,13 @@ class ChiSquareWordCount(mrjob.MRJob):
             yield word, str(data)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Process some integers.')
     parser.add_argument('--stopwords', help='Path to stopwords file')
     parser.add_argument('--reviews', help='Path to reviews dataset')
     args = parser.parse_args()
+
+    # Add your logic to load stopwords and run the MRJob here
+
 
     load_stopwords(args.stopwords)  
     ChiSquareWordCount.ARGS = [
