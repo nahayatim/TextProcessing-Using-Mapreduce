@@ -1,12 +1,26 @@
 import re
 import json
-import mrjob
-import argparse
+from mrjob.job import MRJob
 import collections
 
 STOPWORDS = set() #We will populate this with stop words
 
-class ChiSquareWordCount(mrjob.MRJob):
+def load_stopwords(file_path):
+    with open(file_path, 'r') as f:
+        for line in f:
+            STOPWORDS.add(line.strip())
+
+class ChiSquareWordCount(MRJob):
+
+    def configure_args(self):
+        super(ChiSquareWordCount, self).configure_args()
+        self.add_file_arg('--stopwords')
+
+    def mapper_init(self):
+        load_stopwords(self.options.stopwords)
+
+
+        
     def mapper(self, _, line):
         review = json.loads(line)
         text = review['reviewText']
@@ -17,7 +31,7 @@ class ChiSquareWordCount(mrjob.MRJob):
 
         for token in filtered_tokens:
             yield (token, category), 1 
-            
+
     def reducer(self, key, values):
         word, category = key
         word_count = sum(values)  # Count of the word within the category
@@ -40,13 +54,4 @@ class ChiSquareWordCount(mrjob.MRJob):
             yield word, str(data)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--stopwords', help='Path to stopwords file')
-    parser.add_argument('--reviews', help='Path to reviews dataset')
-    args = parser.parse_args()
-
-    load_stopwords(args.stopwords)  
-    ChiSquareWordCount.ARGS = [
-        ('--reviews', args.reviews) 
-    ]
-    ChiSquareWordCount.run() 
+    ChiSquareWordCount.run()
