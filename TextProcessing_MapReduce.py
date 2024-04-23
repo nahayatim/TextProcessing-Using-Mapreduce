@@ -33,88 +33,86 @@ class ChiSquareWordCount(MRJob):
     def mapper_init(self):
 
         #Initialize the mapper by loading stop words from the file specified in the arguments.
-    
-        load_stopwords(self.options.stopwords)
+        #load_stopwords(self.options.stopwords)
+        with open(self.options.stopwords, 'r') as f:
+            for line in f:
+                STOPWORDS.add(line.strip())
 
-
+    @staticmethod
+    def calculate_chi_square(N, W, X, Y, Z):
+        return N * (W * Z - X * Y)**2 / ((W + X) * (Y + Z) * (W + Y) * (X + Z))
         
     def mapper(self, _, line):
         
         #Mapper function to tokenize, filter, and emit unigrams along with their categories.
-        
         review = json.loads(line)
         text = review['reviewText']
         category = review['category']
 
         # Tokenize the text and filter out stop words and tokens with length 1
        # Pre-compile the regular expression pattern
-        token_pattern = re.compile(r'[\\s\\t\\d\\(\\)\\[\\]\\{\\}\\.\\!\\?,;:\\+=\\-_\"\'`~#@&*%€$§\\/]+')
-
+        token_pattern = re.compile(r'[\s\t\d\(\)\[\]\{\}\.\!\?,;:\+=\-_"\'`~#@&*%€$§\\/]+')
         # Use the compiled regex object to split the text
         tokens = token_pattern.split(text.lower())
         filtered_tokens = [t for t in tokens if len(t) > 1 and t not in STOPWORDS]
-
+    
         # Emit each unigram along with its category
         for token in filtered_tokens:
             yield (token, category), 1 
+            yield ('*total', category), 1
+            yield (token, '*total'), 1
+            yield ('*total', '*total'), 1
 
-            # Increment counters for total unigrams, category-specific unigrams, and category totals
-            self.increment_counter('total', '*total', 1)
-            self.increment_counter('total', token, 1)
-            self.increment_counter('total', category, 1)
 
     def reducer(self, key, values):
-       
        #Reducer function to aggregate the counts of unigrams per category.
-       yield key, sum(values)
+       total = sum(values)
+       yield None, (key, total)
 
         
 
-    def second_reducer(self, key, values):
-
+    def second_reducer(self, _, values):
         #Second reducer function to calculate chi-square values for unigrams.
-
-        total = sum(values)
-        total_counter = self.increment_counter('total', '*total', 0)  # Get the total count from the counter
-        # Calculate chi-square values for unigrams
-        if key[1] == '*total':
-            chi_square = (total - total_counter) ** 2 / total_counter
-        else:
-            term_counter = self.increment_counter('total', key[0], 0)  # Get the count of the term from the counter
-            if term_counter is not None:
-                chi_square = (total - term_counter) ** 2 / term_counter
-            else:
-                chi_square = 0  # Set chi_square to 0 if term_counter is None
-        yield (key[1], -chi_square), key[0]
+        counts = collections.defaultdict(lambda: collections.defaultdict(int))
+        total_counts = collections.defaultdict(int)
+        for (word, category), count in values:
+            counts[word][category] = count
+            total_counts[word] += count
+            total_counts[category] += count
+        N = sum(total_counts.values())
+        for word, categories in counts.items():
+            for category, W in categories.items():
+                X = total_counts[word] - W
+                Y = total_counts[category] - W
+                Z = N - W - X - Y
+                chi_square = self.calculate_chi_square(N, W, X, Y, Z)
+                yield (category, -chi_square), (word, chi_square)
 
     
     def third_reducer(self, key, values):
-
-        #Third reducer function to select the top 75 terms per category.
-        terms = list(values)[:75]
-        for term in terms:
-            yield None, term
-        yield key[0], terms
+        # Extract category name from the key
+        category = key[0]
+        # Sort the values (terms) by their chi-square values in descending order
+        sorted_values = sorted(values, key=lambda x: float(x[1]), reverse=True)
+        # Select the top 75 terms per category
+        top_terms = sorted_values[:75]
+        # Yield the category name and the top 75 terms
+        yield category, ' '.join([f'{term}:{chi:.2f}' for term, chi in top_terms])
 
     def fourth_reducer(self, key, values):
-
         #Fourth reducer function to format the output according to the task requirements.
-
         output_values = []  # Initialize output_values here
         if key is None:
-            yield '*merged', ' '.join(sorted(set(values)))
+            # Flatten the list of terms and remove duplicates
+            all_terms = sorted(set(item for sublist in values for item in sublist))
+            yield '*merged', ' '.join(all_terms)
         else:
             # Extract category name from the key
             category = key
-            # Filter out any non-string values and ensure they are in the correct format
-            valid_values = [value for value in values if isinstance(value, str) and ':' in value]
-            # Sort terms by their chi-square values in descending order
-            sorted_values = sorted(valid_values, key=lambda x: float(x.split(':')[1]), reverse=True)
-            # Select the top 75 terms for the category
-            top_terms = sorted_values[:75]
-            # Append top terms to output_values
-            output_values.append(f'{category} ' + ' '.join(top_terms))
-            yield None, output_values[0]
+            # Flatten the list of terms
+            all_terms = [item for sublist in values for item in sublist]
+            # Yield the category name and all terms
+            yield category, ' '.join(all_terms)
 
 if __name__ == '__main__':
     ChiSquareWordCount.run()
