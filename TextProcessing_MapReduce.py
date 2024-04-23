@@ -47,7 +47,11 @@ class ChiSquareWordCount(MRJob):
         category = review['category']
 
         # Tokenize the text and filter out stop words and tokens with length 1
-        tokens = re.split(r'\W+', text.lower())  
+       # Pre-compile the regular expression pattern
+        token_pattern = re.compile(r'[\\s\\t\\d\\(\\)\\[\\]\\{\\}\\.\\!\\?,;:\\+=\\-_\"\'`~#@&*%€$§\\/]+')
+
+        # Use the compiled regex object to split the text
+        tokens = token_pattern.split(text.lower())
         filtered_tokens = [t for t in tokens if len(t) > 1 and t not in STOPWORDS]
 
         # Emit each unigram along with its category
@@ -110,7 +114,7 @@ class ChiSquareWordCount(MRJob):
             top_terms = sorted_values[:75]
             # Append top terms to output_values
             output_values.append(f'{category} ' + ' '.join(top_terms))
-            yield None, output_values
+            yield None, output_values[0]
 
 if __name__ == '__main__':
     ChiSquareWordCount.run()
